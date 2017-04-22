@@ -24,6 +24,8 @@ namespace SampleMastodon
     class ScriptEvaluateBot
     {
         private Dictionary<string, IDisposable> EvaluateScriptCollection;
+        private MastodonClient Client;
+        private IObservable<IStreamEntity> Stream;
 
         private static readonly string[] DefaultImports =
         {
@@ -60,8 +62,15 @@ namespace SampleMastodon
             Console.WriteLine("Start StreamEvaluateBot");
             var scriptDir = "./Script";
 
-            var client = new MastodonClient(host, accessToken);
-            var stream = client.GetObservablePublicTimeline();
+            Client = new MastodonClient(host, accessToken);
+            Stream = Client.GetObservablePublicTimeline();
+
+            var scriptFiles = Directory.GetFiles(scriptDir, "*.csx");
+
+            Parallel.ForEach(scriptFiles, async (name) =>
+            {
+                await Eval("", name);
+            });
 
             var fileChangeWatcher = new FileSystemWatcher
             {
@@ -76,29 +85,7 @@ namespace SampleMastodon
                 if (!File.Exists(Path.Combine(scriptDir, e.Name))) return;
                 if (e.Name.Split('.').Last() != "csx") return;
 
-                using (var fs = new FileStream(Path.Combine(scriptDir, e.Name), FileMode.Open))
-                {
-                    var codeByte = new byte[fs.Length];
-                    await fs.ReadAsync(codeByte, 0, codeByte.Length);
-                    var code = System.Text.Encoding.UTF8.GetString(codeByte, 0, codeByte.Length);
-
-                    var evalResult = await CSharpCodeEvaluate(code, stream, client);
-                    if (evalResult == null)
-                    {
-                        Console.WriteLine($"Evaluation Failed: {e.Name}");
-                        return;
-                    }
-
-                    IDisposable old;
-                    var isUpdate = EvaluateScriptCollection.TryGetValue(e.Name, out old);
-                    if (isUpdate)
-                    {
-                        EvaluateScriptCollection.Remove(e.Name);
-                        old.Dispose();
-                    }
-                    Console.WriteLine($"{e.ChangeType} {(isUpdate ? "Update" : "Add")} {e.Name}");
-                    EvaluateScriptCollection.Add(e.Name, evalResult);
-                }
+                await Eval(scriptDir, e.Name);
             });
 
             var fileDeleted = new FileSystemEventHandler((sender, e) =>
@@ -132,7 +119,30 @@ namespace SampleMastodon
             }
         }
 
-        private async Task<IDisposable> CSharpCodeEvaluate(string code, IObservable<IStreamEntity> stream, MastodonClient client)
+        private async Task Eval(string path, string name)
+        {
+            var fullPath = Path.Combine(path, name);
+            var code = await ReadCodeFile(fullPath);
+
+            var evalResult = await CSharpCodeEvaluate(code);
+            if (evalResult == null)
+            {
+                Console.WriteLine($"Evaluation Failed: {name}");
+                return;
+            }
+
+            IDisposable old;
+            var isUpdate = EvaluateScriptCollection.TryGetValue(name, out old);
+            if (isUpdate)
+            {
+                EvaluateScriptCollection.Remove(name);
+                old.Dispose();
+            }
+            Console.WriteLine($"{(isUpdate ? "Update" : "Add")} {name}");
+            EvaluateScriptCollection.Add(name, evalResult);
+        }
+
+        private async Task<IDisposable> CSharpCodeEvaluate(string code)
         {
             try
             {
@@ -148,13 +158,23 @@ namespace SampleMastodon
                     "System.Xml.Linq",
                 })
                                    .WithReferences(DefaultReferences),
-                                   globals: new MSParams(stream, client),
+                                   globals: new MSParams(Stream, Client),
                                    globalsType: typeof(MSParams));
             }
             catch (Exception ex) // Evaluate failed
             {
                 Console.WriteLine(ex.Message);
                 return null;
+            }
+        }
+
+        private async Task<string> ReadCodeFile(string path)
+        {
+            using (var fs = new FileStream(path, FileMode.Open))
+            {
+                var codeByte = new byte[fs.Length];
+                await fs.ReadAsync(codeByte, 0, codeByte.Length);
+                return System.Text.Encoding.UTF8.GetString(codeByte, 0, codeByte.Length);
             }
         }
     }
