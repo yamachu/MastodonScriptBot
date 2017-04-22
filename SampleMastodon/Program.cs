@@ -67,10 +67,10 @@ namespace SampleMastodon
 
             var scriptFiles = Directory.GetFiles(scriptDir, "*.csx");
 
-            Parallel.ForEach(scriptFiles, async (name) =>
+            foreach (var name in scriptFiles)
             {
                 await Eval(scriptDir, Path.GetFileName(name));
-            });
+            }
 
             var fileChangeWatcher = new FileSystemWatcher
             {
