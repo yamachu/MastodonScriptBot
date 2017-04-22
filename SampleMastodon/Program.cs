@@ -60,7 +60,7 @@ namespace SampleMastodon
         public async Task StreamEvaluate(string host, string accessToken)
         {
             Console.WriteLine("Start StreamEvaluateBot");
-            var scriptDir = "./Script";
+            var scriptDir = "Script";
 
             Client = new MastodonClient(host, accessToken);
             Stream = Client.GetObservablePublicTimeline();
@@ -69,12 +69,12 @@ namespace SampleMastodon
 
             Parallel.ForEach(scriptFiles, async (name) =>
             {
-                await Eval("", name);
+                await Eval(scriptDir, Path.GetFileName(name));
             });
 
             var fileChangeWatcher = new FileSystemWatcher
             {
-                Path = "./Script",
+                Path = scriptDir,
                 Filter = "*.csx*",
                 NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
                 EnableRaisingEvents = true
